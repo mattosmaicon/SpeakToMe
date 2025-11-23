@@ -57,6 +57,12 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       setStatus(SessionStatus.CONNECTING);
       setErrorMessage('');
 
+      // Validate API Key strictly
+      const apiKey = process.env.API_KEY;
+      if (!apiKey) {
+        throw new Error("API Key not found. Please check your settings.");
+      }
+
       // Initialize Audio Contexts
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       inputAudioContextRef.current = new AudioContextClass({ sampleRate: INPUT_SAMPLE_RATE });
@@ -76,7 +82,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       // Get Microphone Access
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
 
       // Build System Instruction based on user config
       const systemInstruction = `
