@@ -1,0 +1,7 @@
+{
+  "name": "SpeakToMe",
+  "description": "An intelligent, real-time voice conversation app for language learning. It uses the Gemini Live API to provide a human-like speaking partner that adapts to your language level and goals.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
