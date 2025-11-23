@@ -69,7 +69,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       // Get Microphone Access
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const ai = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY });
 
       // Build System Instruction based on user config
       const systemInstruction = `
