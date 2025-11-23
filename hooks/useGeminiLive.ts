@@ -43,8 +43,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       streamRef.current = null;
     }
 
-    // Close session if possible (Note: SDK doesn't expose explicit close on promise, 
-    // but stopping the stream essentially kills the loop)
+    // Close session if possible
     sessionPromiseRef.current = null;
     
     setStatus(SessionStatus.IDLE);
@@ -63,6 +62,14 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       inputAudioContextRef.current = new AudioContextClass({ sampleRate: INPUT_SAMPLE_RATE });
       outputAudioContextRef.current = new AudioContextClass({ sampleRate: OUTPUT_SAMPLE_RATE });
 
+      // Vital: Resume contexts immediately in case they are suspended by browser policy
+      if (inputAudioContextRef.current.state === 'suspended') {
+        await inputAudioContextRef.current.resume();
+      }
+      if (outputAudioContextRef.current.state === 'suspended') {
+        await outputAudioContextRef.current.resume();
+      }
+
       const outputNode = outputAudioContextRef.current.createGain();
       outputNode.connect(outputAudioContextRef.current.destination);
 
@@ -73,18 +80,17 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
 
       // Build System Instruction based on user config
       const systemInstruction = `
-        You are "SpeakToMe", a friendly, human-like language tutor.
-        My native language is: ${config.nativeLanguage}.
-        I want to learn: ${config.targetLanguage}.
+        Role: You are "SpeakToMe", a highly intelligent, native-level language tutor and conversation partner.
+        Context: The user speaks ${config.nativeLanguage} and wants to practice ${config.targetLanguage}.
         
-        Your Goal: Engage in a natural, fluid conversation in ${config.targetLanguage}.
-        
-        Guidelines:
-        1. Adapt your speaking speed and vocabulary complexity to my level. If I struggle, slow down and simplify.
-        2. Understand common slang in ${config.nativeLanguage} if I accidentally use it, and gently guide me to the ${config.targetLanguage} equivalent.
-        3. Correct my pronunciation or grammar subtly within the flow of conversation (e.g., "Ah, you mean..."). Do not be a strict teacher, be a conversation partner.
-        4. Be spontaneous. Ask questions. Make jokes. Be human.
-        5. DO NOT act like a robot assistant. Do not say "How can I assist you today?". Just start talking like a friend meeting for coffee.
+        Core Behaviors:
+        1. **Adaptability**: Instantly analyze the user's proficiency. If they speak slowly or simply, match that pace. If they are fluent, speak at a normal, rapid native pace.
+        2. **Slang & Colloquialisms**: You understand street slang, idioms, and cultural references in both ${config.nativeLanguage} and ${config.targetLanguage}. If the user uses a slang term in ${config.nativeLanguage}, teach them the cool/natural equivalent in ${config.targetLanguage}.
+        3. **Correction Style**: Do NOT lecture. If the user makes a mistake, rephrase it correctly in your reply naturally (implicit correction). Only stop to explain if the error causes confusion.
+        4. **Personality**: You are NOT an AI assistant. You are a friend. Do not ask "How can I help?". Start with a casual opener like "Hey! So, what's on your mind today?" or "Ready to chat? What's new?".
+        5. **Engagement**: Keep the conversation flowing. Ask follow-up questions. Be curious about their life.
+
+        Objective: Maximize the user's speaking confidence and listening comprehension in ${config.targetLanguage}.
       `;
 
       // Connect to Live API
