@@ -1,6 +1,11 @@
+export type SessionMode = 'free_chat' | 'reconstruction' | 'critical_thinking' | 'translator';
+export type UILanguage = 'en' | 'pt';
+
 export interface LanguageConfig {
   nativeLanguage: string;
   targetLanguage: string;
+  mode: SessionMode;
+  topicOrWords?: string; // Used for critical_thinking mode
 }
 
 export enum SessionStatus {

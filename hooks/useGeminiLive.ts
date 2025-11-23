@@ -50,6 +50,62 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     nextStartTimeRef.current = 0;
   }, []);
 
+  const getSystemInstruction = (config: LanguageConfig) => {
+    const commonRules = `
+      - User's Native Language: ${config.nativeLanguage}
+      - Target Language: ${config.targetLanguage}
+      - If the user makes a pronunciation/grammar mistake, PAUSE and explain it in ${config.nativeLanguage}, then ask them to repeat correctly in ${config.targetLanguage}.
+    `;
+
+    switch (config.mode) {
+      case 'reconstruction':
+        return `
+          Role: Advanced Language Refiner.
+          Task: 
+          1. Listen to the user's sentence (which might be basic or incorrect).
+          2. Do NOT just continue the conversation.
+          3. Instead, say: "Here is a better/native way to say that:" and provide a C1/C2 advanced version of what they tried to say, using better vocabulary and idioms.
+          4. Ask the user to repeat the advanced version.
+          5. Once they repeat, confirm if it was good, then ask the next question to keep the flow.
+          ${commonRules}
+        `;
+      
+      case 'critical_thinking':
+        return `
+          Role: Critical Thinking Debate Partner.
+          Context/Words to use: "${config.topicOrWords || 'General Philosophy'}".
+          Task:
+          1. Start by creating a short, interesting, slightly controversial scenario or story using the Context/Words provided above.
+          2. Ask the user DEEP "Why", "How", or "What if" questions about it.
+          3. Do NOT accept simple answers. Force the user to argue their point.
+          4. If they give a short answer, ask: "Can you explain why you think that in more detail?"
+          ${commonRules}
+        `;
+
+      case 'translator':
+        return `
+          Role: Strict Live Translator & Pronunciation Coach.
+          Task:
+          1. The user will speak in ${config.nativeLanguage}.
+          2. You must immediately translate what they said into ${config.targetLanguage} with perfect accent and intonation.
+          3. Then, ask the user to repeat the ${config.targetLanguage} phrase.
+          4. Listen strictly to their repetition. If it's bad, correct them in ${config.nativeLanguage}.
+          5. If they speak ${config.targetLanguage} initially, just correct them if needed.
+        `;
+
+      case 'free_chat':
+      default:
+        return `
+          Role: Strict Bilingual Tutor.
+          Rules:
+          1. Start and maintain conversation in ${config.targetLanguage}.
+          2. Be very strict about pronunciation and grammar.
+          3. Explain mistakes in ${config.nativeLanguage} clearly.
+          4. Make the user repeat correctly before moving on.
+        `;
+    }
+  };
+
   const connect = useCallback(async () => {
     if (!config) return;
     
@@ -57,7 +113,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       setStatus(SessionStatus.CONNECTING);
       setErrorMessage('');
 
-      // Validate API Key strictly
       const apiKey = process.env.API_KEY;
       if (!apiKey) {
         throw new Error("API Key not found. Please check your settings.");
@@ -68,7 +123,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       inputAudioContextRef.current = new AudioContextClass({ sampleRate: INPUT_SAMPLE_RATE });
       outputAudioContextRef.current = new AudioContextClass({ sampleRate: OUTPUT_SAMPLE_RATE });
 
-      // Vital: Resume contexts immediately in case they are suspended by browser policy
       if (inputAudioContextRef.current.state === 'suspended') {
         await inputAudioContextRef.current.resume();
       }
@@ -79,27 +133,11 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       const outputNode = outputAudioContextRef.current.createGain();
       outputNode.connect(outputAudioContextRef.current.destination);
 
-      // Get Microphone Access
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       const ai = new GoogleGenAI({ apiKey });
+      const systemInstruction = getSystemInstruction(config);
 
-      // Build System Instruction based on user config
-      const systemInstruction = `
-        Role: You are "SpeakToMe", a highly intelligent, native-level language tutor and conversation partner.
-        Context: The user speaks ${config.nativeLanguage} and wants to practice ${config.targetLanguage}.
-        
-        Core Behaviors:
-        1. **Adaptability**: Instantly analyze the user's proficiency. If they speak slowly or simply, match that pace. If they are fluent, speak at a normal, rapid native pace.
-        2. **Slang & Colloquialisms**: You understand street slang, idioms, and cultural references in both ${config.nativeLanguage} and ${config.targetLanguage}. If the user uses a slang term in ${config.nativeLanguage}, teach them the cool/natural equivalent in ${config.targetLanguage}.
-        3. **Correction Style**: Do NOT lecture. If the user makes a mistake, rephrase it correctly in your reply naturally (implicit correction). Only stop to explain if the error causes confusion.
-        4. **Personality**: You are NOT an AI assistant. You are a friend. Do not ask "How can I help?". Start with a casual opener like "Hey! So, what's on your mind today?" or "Ready to chat? What's new?".
-        5. **Engagement**: Keep the conversation flowing. Ask follow-up questions. Be curious about their life.
-
-        Objective: Maximize the user's speaking confidence and listening comprehension in ${config.targetLanguage}.
-      `;
-
-      // Connect to Live API
       sessionPromiseRef.current = ai.live.connect({
         model: 'gemini-2.5-flash-native-audio-preview-09-2025',
         callbacks: {
@@ -107,7 +145,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             console.log("Gemini Live Connected");
             setStatus(SessionStatus.CONNECTED);
 
-            // Setup Input Audio Processing
             if (!inputAudioContextRef.current || !streamRef.current) return;
             
             const source = inputAudioContextRef.current.createMediaStreamSource(streamRef.current);
@@ -131,11 +168,9 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             scriptProcessorRef.current = processor;
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Handle Audio Output
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             
             if (base64Audio && outputAudioContextRef.current) {
-              // Sync start time
               nextStartTimeRef.current = Math.max(
                 nextStartTimeRef.current,
                 outputAudioContextRef.current.currentTime
@@ -162,7 +197,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               audioSourcesRef.current.add(source);
             }
 
-            // Handle Interruptions
             if (message.serverContent?.interrupted) {
               console.log("Interrupted - clearing audio queue");
               audioSourcesRef.current.forEach((src) => {
