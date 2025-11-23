@@ -4,7 +4,8 @@ export const TRANSLATIONS = {
   en: {
     setup: {
       step1Title: "Choose your languages",
-      step2Title: "Choose your training mode",
+      step2Title: "What is your fluency level?",
+      step3Title: "Choose your training mode",
       iSpeak: "I speak...",
       wantToLearn: "I want to learn...",
       next: "Next Step",
@@ -12,6 +13,25 @@ export const TRANSLATIONS = {
       topicLabel: "Topic or Words to use:",
       topicPlaceholder: "e.g. Technology, Global Warming, or specific words...",
       back: "Back",
+      requiresAdvanced: "Requires Advanced or Native level",
+      difficulty: {
+        beginner: {
+          title: "Beginner (A1-A2)",
+          desc: "Speak slowly, simple words, be patient."
+        },
+        intermediate: {
+          title: "Intermediate (B1-B2)",
+          desc: "Normal speed, standard vocabulary, correct major errors."
+        },
+        advanced: {
+          title: "Advanced (C1)",
+          desc: "Natural speed, complex topics, strict correction."
+        },
+        native: {
+          title: "Native Like (C2)",
+          desc: "Fast pace, idioms, slang, deep nuance."
+        }
+      },
       modes: {
         free_chat: {
           title: "Free Conversation",
@@ -27,7 +47,7 @@ export const TRANSLATIONS = {
         },
         translator: {
           title: "Live Translator",
-          desc: "Speak in your language, AI translates to target."
+          desc: "Instant bidirectional translation between selected languages."
         }
       },
       settings: "Settings",
@@ -38,7 +58,7 @@ export const TRANSLATIONS = {
       end: "End Conversation",
       reconnect: "Reconnect",
       listening: "Listening... Speak naturally.",
-      translateHint: (lang: string) => `Speak ${lang}, I'll translate.`,
+      translateHint: (lang: string) => `Translating between selected languages...`,
       interruptHint: "AI will interrupt to correct pronunciation & grammar.",
       connectionIssue: "Connection Issue",
       goBack: "Go Back",
@@ -56,7 +76,8 @@ export const TRANSLATIONS = {
   pt: {
     setup: {
       step1Title: "Escolha seus idiomas",
-      step2Title: "Escolha seu modo de treino",
+      step2Title: "Qual seu nível de fluência?",
+      step3Title: "Escolha seu modo de treino",
       iSpeak: "Eu falo...",
       wantToLearn: "Eu quero aprender...",
       next: "Próximo Passo",
@@ -64,6 +85,25 @@ export const TRANSLATIONS = {
       topicLabel: "Tópico ou Palavras para usar:",
       topicPlaceholder: "ex: Tecnologia, Aquecimento Global, ou palavras específicas...",
       back: "Voltar",
+      requiresAdvanced: "Requer nível Avançado ou Nativo",
+      difficulty: {
+        beginner: {
+          title: "Iniciante (A1-A2)",
+          desc: "Fale devagar, palavras simples, seja paciente."
+        },
+        intermediate: {
+          title: "Intermediário (B1-B2)",
+          desc: "Velocidade normal, vocabulário padrão, corrija erros maiores."
+        },
+        advanced: {
+          title: "Avançado (C1)",
+          desc: "Velocidade natural, tópicos complexos, correção rigorosa."
+        },
+        native: {
+          title: "Nativo (C2)",
+          desc: "Ritmo rápido, gírias, expressões, nuances profundas."
+        }
+      },
       modes: {
         free_chat: {
           title: "Conversação Livre",
@@ -79,7 +119,7 @@ export const TRANSLATIONS = {
         },
         translator: {
           title: "Tradutor Ao Vivo",
-          desc: "Fale no seu idioma, a IA traduz para o alvo."
+          desc: "Tradução bidirecional instantânea entre os idiomas."
         }
       },
       settings: "Configurações",
@@ -90,7 +130,7 @@ export const TRANSLATIONS = {
       end: "Encerrar Conversa",
       reconnect: "Reconectar",
       listening: "Ouvindo... Fale naturalmente.",
-      translateHint: (lang: string) => `Fale ${lang}, eu traduzirei.`,
+      translateHint: (lang: string) => `Traduzindo entre os idiomas selecionados...`,
       interruptHint: "A IA irá interromper para corrigir pronúncia e gramática.",
       connectionIssue: "Problema de Conexão",
       goBack: "Voltar",

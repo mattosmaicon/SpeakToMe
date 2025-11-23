@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { LanguageConfig, SessionMode, UILanguage } from '../types';
-import { Mic, Globe, ArrowRight, Sparkles, Brain, Languages, MessageSquare, ChevronLeft, Settings, X } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { LanguageConfig, SessionMode, UILanguage, FluencyLevel } from '../types';
+import { Mic, Globe, ArrowRight, Sparkles, Brain, Languages, MessageSquare, ChevronLeft, Settings, X, Feather, Zap, Flame, Crown, Lock } from 'lucide-react';
 import { TRANSLATIONS, DISPLAY_LANGUAGES } from '../utils/translations';
 
 interface SetupScreenProps {
@@ -16,10 +16,18 @@ const MODES_ICONS = {
   translator: Languages,
 };
 
+const DIFFICULTY_ICONS = {
+  beginner: Feather,
+  intermediate: Zap,
+  advanced: Flame,
+  native: Crown
+};
+
 const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLanguage }) => {
   const [step, setStep] = useState(1);
   const [native, setNative] = useState(DISPLAY_LANGUAGES[uiLanguage][0]);
   const [target, setTarget] = useState(DISPLAY_LANGUAGES[uiLanguage][1]);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<FluencyLevel>('intermediate');
   const [selectedMode, setSelectedMode] = useState<SessionMode>('free_chat');
   const [topic, setTopic] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -27,20 +35,39 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLan
   const t = TRANSLATIONS[uiLanguage].setup;
   const currentLangList = DISPLAY_LANGUAGES[uiLanguage];
 
+  // Auto-switch mode if reconstruction is selected but difficulty doesn't support it
+  useEffect(() => {
+    if (selectedMode === 'reconstruction' && !['advanced', 'native'].includes(selectedDifficulty)) {
+      setSelectedMode('free_chat');
+    }
+  }, [selectedDifficulty, selectedMode]);
+
   const handleStart = () => {
     onStart({ 
       nativeLanguage: native, 
       targetLanguage: target,
       mode: selectedMode,
+      difficulty: selectedDifficulty,
       topicOrWords: topic 
     });
+  };
+
+  const getStepTitle = () => {
+    switch (step) {
+      case 1: return t.step1Title;
+      case 2: return t.step2Title;
+      case 3: return t.step3Title;
+      default: return "";
+    }
   };
 
   const getModeInfo = (modeKey: SessionMode) => {
     return t.modes[modeKey];
   };
-
-  const ModeIcon = MODES_ICONS[selectedMode] || MessageSquare;
+  
+  const getDifficultyInfo = (diffKey: FluencyLevel) => {
+    return t.difficulty[diffKey];
+  };
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-4 py-8 max-w-md mx-auto w-full transition-all relative">
@@ -110,13 +137,14 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLan
           SpeakToMe
         </h1>
         <p className="text-slate-400 mt-2">
-          {step === 1 ? t.step1Title : t.step2Title}
+          {getStepTitle()}
         </p>
       </div>
 
       <div className="w-full bg-slate-800/50 p-6 rounded-2xl border border-slate-700/50 backdrop-blur-sm transition-all duration-300">
         
-        {step === 1 ? (
+        {/* STEP 1: Languages */}
+        {step === 1 && (
           <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
             <div className="space-y-2">
               <label className="text-sm font-medium text-slate-300 flex items-center gap-2">
@@ -152,33 +180,111 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLan
               <ArrowRight className="w-5 h-5" />
             </button>
           </div>
-        ) : (
+        )}
+
+        {/* STEP 2: Difficulty */}
+        {step === 2 && (
           <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
             <div className="grid grid-cols-1 gap-3">
-              {(Object.keys(t.modes) as SessionMode[]).map((modeKey) => {
-                const info = getModeInfo(modeKey);
-                const Icon = MODES_ICONS[modeKey];
+              {(Object.keys(t.difficulty) as FluencyLevel[]).map((diffKey) => {
+                const info = getDifficultyInfo(diffKey);
+                const Icon = DIFFICULTY_ICONS[diffKey];
                 return (
                   <button
-                    key={modeKey}
-                    onClick={() => setSelectedMode(modeKey)}
+                    key={diffKey}
+                    onClick={() => setSelectedDifficulty(diffKey)}
                     className={`relative p-4 rounded-xl text-left border transition-all ${
-                      selectedMode === modeKey 
+                      selectedDifficulty === diffKey 
                         ? 'bg-indigo-600/20 border-indigo-500' 
                         : 'bg-slate-900/50 border-slate-700 hover:bg-slate-800'
                     }`}
                   >
                     <div className="flex items-start gap-3">
-                      <div className={`p-2 rounded-lg ${selectedMode === modeKey ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
+                      <div className={`p-2 rounded-lg ${selectedDifficulty === diffKey ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'}`}>
                         <Icon className="w-5 h-5" />
                       </div>
                       <div>
-                        <h3 className={`font-semibold ${selectedMode === modeKey ? 'text-white' : 'text-slate-200'}`}>
+                        <h3 className={`font-semibold ${selectedDifficulty === diffKey ? 'text-white' : 'text-slate-200'}`}>
                           {info.title}
                         </h3>
                         <p className="text-xs text-slate-400 mt-1 leading-relaxed">
                           {info.desc}
                         </p>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button 
+                onClick={() => setStep(1)}
+                className="px-4 py-4 rounded-xl bg-slate-800 text-slate-300 hover:text-white transition-colors"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+              <button 
+                onClick={() => setStep(3)}
+                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold py-4 rounded-xl transition-all flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25"
+              >
+                {t.next}
+                <ArrowRight className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* STEP 3: Mode */}
+        {step === 3 && (
+          <div className="space-y-4 animate-in fade-in slide-in-from-right-4">
+            <div className="grid grid-cols-1 gap-3">
+              {(Object.keys(t.modes) as SessionMode[]).map((modeKey) => {
+                const info = getModeInfo(modeKey);
+                const Icon = MODES_ICONS[modeKey];
+                
+                // Logic to lock Reconstruction mode if not Advanced/Native
+                const isReconstruction = modeKey === 'reconstruction';
+                const isRestricted = isReconstruction && !['advanced', 'native'].includes(selectedDifficulty);
+
+                return (
+                  <button
+                    key={modeKey}
+                    onClick={() => !isRestricted && setSelectedMode(modeKey)}
+                    disabled={isRestricted}
+                    className={`relative p-4 rounded-xl text-left border transition-all ${
+                      isRestricted
+                        ? 'bg-slate-900/30 border-slate-800 cursor-not-allowed opacity-60'
+                        : selectedMode === modeKey 
+                          ? 'bg-indigo-600/20 border-indigo-500' 
+                          : 'bg-slate-900/50 border-slate-700 hover:bg-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={`p-2 rounded-lg ${
+                        isRestricted 
+                          ? 'bg-slate-800 text-slate-600'
+                          : selectedMode === modeKey ? 'bg-indigo-500 text-white' : 'bg-slate-800 text-slate-400'
+                        }`}>
+                        {isRestricted ? <Lock className="w-5 h-5" /> : <Icon className="w-5 h-5" />}
+                      </div>
+                      <div className="flex-1">
+                        <h3 className={`font-semibold ${
+                          isRestricted 
+                            ? 'text-slate-500'
+                            : selectedMode === modeKey ? 'text-white' : 'text-slate-200'
+                        }`}>
+                          {info.title}
+                        </h3>
+                        {isRestricted ? (
+                          <p className="text-xs text-amber-500/80 font-medium mt-1">
+                            {t.requiresAdvanced}
+                          </p>
+                        ) : (
+                          <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                            {info.desc}
+                          </p>
+                        )}
                       </div>
                     </div>
                   </button>
@@ -203,7 +309,7 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLan
 
             <div className="flex gap-3 mt-6">
               <button 
-                onClick={() => setStep(1)}
+                onClick={() => setStep(2)}
                 className="px-4 py-4 rounded-xl bg-slate-800 text-slate-300 hover:text-white transition-colors"
               >
                 <ChevronLeft className="w-6 h-6" />
