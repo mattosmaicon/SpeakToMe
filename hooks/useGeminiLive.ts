@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { LanguageConfig, SessionStatus } from '../types';
+import { LanguageConfig, SessionStatus, ChatMessage } from '../types';
 import { createPcmBlob, base64ToBytes, decodeAudioData } from '../utils/audioUtils';
 
 // Constants for audio settings
@@ -16,6 +16,7 @@ const cleanPrompt = (text: string) => {
 export const useGeminiLive = (config: LanguageConfig | null) => {
   const [status, setStatus] = useState<SessionStatus>(SessionStatus.IDLE);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   
   // Refs for audio handling to avoid re-renders
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -186,12 +187,37 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     return `${difficultyRules} ${cleanPrompt(modeInstruction)}`;
   };
 
+  const sendTextMessage = useCallback((text: string) => {
+    if (!sessionPromiseRef.current) return;
+    
+    // Optimistically add user message
+    const newMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'user',
+      text: text,
+      isFinal: true,
+      timestamp: Date.now()
+    };
+    setMessages(prev => [...prev, newMessage]);
+
+    sessionPromiseRef.current.then((session: any) => {
+      try {
+        session.sendRealtimeInput({ 
+          content: [{ role: "user", parts: [{ text }] }] 
+        });
+      } catch (e) {
+        console.error("Error sending text", e);
+      }
+    });
+  }, []);
+
   const connect = useCallback(async () => {
     if (!config) return;
     
     try {
       setStatus(SessionStatus.CONNECTING);
       setErrorMessage('');
+      setMessages([]);
 
       const apiKey = process.env.API_KEY;
       if (!apiKey) {
@@ -217,7 +243,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       
       const ai = new GoogleGenAI({ apiKey });
       
-      // CRITICAL FIX: Ensure clean string and wrap in parts object for production stability
       const systemInstructionText = getSystemInstruction(config);
       
       sessionPromiseRef.current = ai.live.connect({
@@ -254,7 +279,49 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             scriptProcessorRef.current = processor;
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Safe access to audio data
+            const timestamp = Date.now();
+
+            // --- Handle Transcription ---
+            let textUpdate = '';
+            let role: 'user' | 'model' | null = null;
+
+            if (message.serverContent?.outputTranscription) {
+              textUpdate = message.serverContent.outputTranscription.text;
+              role = 'model';
+            } else if (message.serverContent?.inputTranscription) {
+              textUpdate = message.serverContent.inputTranscription.text;
+              role = 'user';
+            }
+
+            if (role && textUpdate) {
+              setMessages(prev => {
+                const lastMsg = prev[prev.length - 1];
+                
+                // If the last message matches the role and isn't final, append to it
+                if (lastMsg && lastMsg.role === role && !lastMsg.isFinal) {
+                  const updatedMsg = { ...lastMsg, text: lastMsg.text + textUpdate };
+                  return [...prev.slice(0, -1), updatedMsg];
+                } 
+                
+                // Otherwise create new message (unless it's an empty update)
+                if (!textUpdate.trim()) return prev;
+
+                return [...prev, {
+                  id: timestamp.toString(),
+                  role: role!,
+                  text: textUpdate,
+                  isFinal: false,
+                  timestamp
+                }];
+              });
+            }
+
+            // Mark messages as final when turn completes or interrupted
+            if (message.serverContent?.turnComplete || message.serverContent?.interrupted) {
+              setMessages(prev => prev.map(m => ({ ...m, isFinal: true })));
+            }
+
+            // --- Handle Audio ---
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             
             if (base64Audio && outputAudioContextRef.current) {
@@ -309,10 +376,12 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
         },
         config: {
           responseModalities: [Modality.AUDIO],
+          // Enable bi-directional transcription
+          inputAudioTranscription: {}, 
+          outputAudioTranscription: {},
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
           },
-          // Explicitly structure the instruction as content parts for API stability
           systemInstruction: { parts: [{ text: systemInstructionText }] },
         }
       });
@@ -333,6 +402,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     status,
     connect,
     disconnect: cleanup,
-    errorMessage
+    errorMessage,
+    messages,
+    sendTextMessage
   };
 };
