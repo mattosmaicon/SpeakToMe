@@ -325,7 +325,15 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       const outputNode = outputAudioContextRef.current.createGain();
       outputNode.connect(outputAudioContextRef.current.destination);
 
-      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Improved audio constraints for better transcription
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          sampleRate: INPUT_SAMPLE_RATE,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        } 
+      });
       
       const ai = new GoogleGenAI({ apiKey });
       const systemInstruction = getSystemInstruction(config);
@@ -360,6 +368,9 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             scriptProcessorRef.current = processor;
           },
           onmessage: async (message: LiveServerMessage) => {
+            // Safety check: sometimes keepalive messages don't have serverContent
+            if (!message.serverContent) return;
+
             // Handle Audio
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio && outputAudioContextRef.current) {
