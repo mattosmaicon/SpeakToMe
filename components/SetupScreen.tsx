@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LanguageConfig, SessionMode, UILanguage, FluencyLevel } from '../types';
-import { Mic, Globe, ArrowRight, Sparkles, Brain, Languages, MessageSquare, ChevronLeft, Settings, X, Feather, Zap, Flame, Crown, Lock } from 'lucide-react';
+import { Mic, Globe, ArrowRight, Sparkles, Brain, Languages, MessageSquare, ChevronLeft, Settings, X, Feather, Zap, Flame, Crown, Lock, Download } from 'lucide-react';
 import { TRANSLATIONS, DISPLAY_LANGUAGES } from '../utils/translations';
 
 interface SetupScreenProps {
@@ -31,9 +31,30 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLan
   const [selectedMode, setSelectedMode] = useState<SessionMode>('free_chat');
   const [topic, setTopic] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
 
   const t = TRANSLATIONS[uiLanguage].setup;
   const currentLangList = DISPLAY_LANGUAGES[uiLanguage];
+
+  // Capture install prompt
+  useEffect(() => {
+    const handler = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstall = () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    deferredPrompt.userChoice.then((choiceResult: any) => {
+      if (choiceResult.outcome === 'accepted') {
+        setDeferredPrompt(null);
+      }
+    });
+  };
 
   // Auto-switch mode if reconstruction is selected but difficulty doesn't support it
   useEffect(() => {
@@ -91,32 +112,46 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLan
               </button>
             </div>
             
-            <div className="space-y-4">
-              <label className="text-sm font-medium text-slate-300 block">
-                {t.uiLanguage}
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => setUiLanguage('en')}
-                  className={`py-3 rounded-xl border font-medium transition-all ${
-                    uiLanguage === 'en'
-                      ? 'bg-indigo-600 border-indigo-500 text-white'
-                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-700'
-                  }`}
-                >
-                  English
-                </button>
-                <button
-                  onClick={() => setUiLanguage('pt')}
-                  className={`py-3 rounded-xl border font-medium transition-all ${
-                    uiLanguage === 'pt'
-                      ? 'bg-indigo-600 border-indigo-500 text-white'
-                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-700'
-                  }`}
-                >
-                  Português
-                </button>
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <label className="text-sm font-medium text-slate-300 block">
+                  {t.uiLanguage}
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => setUiLanguage('en')}
+                    className={`py-3 rounded-xl border font-medium transition-all ${
+                      uiLanguage === 'en'
+                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-700'
+                    }`}
+                  >
+                    English
+                  </button>
+                  <button
+                    onClick={() => setUiLanguage('pt')}
+                    className={`py-3 rounded-xl border font-medium transition-all ${
+                      uiLanguage === 'pt'
+                        ? 'bg-indigo-600 border-indigo-500 text-white'
+                        : 'bg-slate-900 border-slate-700 text-slate-400 hover:bg-slate-700'
+                    }`}
+                  >
+                    Português
+                  </button>
+                </div>
               </div>
+
+              {deferredPrompt && (
+                <div className="pt-2 border-t border-slate-700">
+                  <button
+                    onClick={handleInstall}
+                    className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold py-3 rounded-xl transition-all flex items-center justify-center gap-2"
+                  >
+                    <Download className="w-5 h-5" />
+                    {t.installApp}
+                  </button>
+                </div>
+              )}
             </div>
 
             <button 

@@ -52,6 +52,7 @@ export const TRANSLATIONS = {
       },
       settings: "Settings",
       uiLanguage: "Interface Language",
+      installApp: "Install App",
       close: "Close"
     },
     active: {
@@ -124,6 +125,7 @@ export const TRANSLATIONS = {
       },
       settings: "Configurações",
       uiLanguage: "Idioma da Interface",
+      installApp: "Instalar App",
       close: "Fechar"
     },
     active: {
