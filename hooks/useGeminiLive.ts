@@ -194,7 +194,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       // DEDUPLICATION SAFEGUARD:
       // If we are trying to add a FINAL user message, check if the VERY LAST message
       // is already a final user message with the EXACT SAME text.
-      // This prevents double rendering if the system echoes text or if state updates race.
       if (isFinal && role === 'user') {
           const lastMsg = newArr[newArr.length - 1];
           if (lastMsg && lastMsg.role === 'user' && lastMsg.text === newText && !lastMsg.isTentative) {
@@ -203,8 +202,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       }
 
       // SEARCH BACKWARDS: Find the last tentative message of THIS specific role.
-      // This fixes the duplication bug where a Model message appearing before User finalization
-      // would cause the User message to be duplicated instead of updated.
       let targetIndex = -1;
       for (let i = newArr.length - 1; i >= 0; i--) {
         if (newArr[i].role === role && newArr[i].isTentative) {
@@ -264,7 +261,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             const session = await sessionPromiseRef.current;
             
             // 2. Optimistically add the USER message as FINAL immediately
-            // We use a unique ID. Logic in updateMessages will prevent duplication if echo occurs.
             setMessages(prev => [...prev, {
                 id: Date.now().toString(),
                 role: 'user',
@@ -280,16 +276,14 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
                 turnComplete: true 
             };
 
-            // 3. Send text to Gemini Live
-            // We check for method existence to avoid crashes on different SDK versions
+            // 3. Send text to Gemini Live with SAFEGUARD
+            // Different SDK versions might expose different methods. We check before calling.
             if (typeof session.send === 'function') {
                 session.send({ clientContent });
             } else if (typeof (session as any).sendClientContent === 'function') {
-                // Fallback for some SDK versions
                 (session as any).sendClientContent(clientContent);
             } else {
-                console.warn("Text messaging method not found on session object. This feature might not be supported in the current environment.");
-                // We do not throw, to keep the session alive.
+                console.warn("Text messaging method not found on session object. Feature unavailable.");
             }
         } catch (e) {
             console.error("Failed to send text:", e);
@@ -325,7 +319,16 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       const outputNode = outputAudioContextRef.current.createGain();
       outputNode.connect(outputAudioContextRef.current.destination);
 
-      streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Use enhanced constraints for better transcription
+      streamRef.current = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+            channelCount: 1,
+            sampleRate: INPUT_SAMPLE_RATE,
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true
+        } 
+      });
       
       const ai = new GoogleGenAI({ apiKey });
       const systemInstruction = getSystemInstruction(config);
@@ -348,7 +351,9 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               
               if (sessionPromiseRef.current) {
                 sessionPromiseRef.current.then((session: any) => {
-                  session.sendRealtimeInput({ media: pcmBlob });
+                   if(session && typeof session.sendRealtimeInput === 'function') {
+                      session.sendRealtimeInput({ media: pcmBlob });
+                   }
                 });
               }
             };
@@ -390,48 +395,47 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             }
 
             // Handle Transcriptions
-            const outputTrans = message.serverContent?.outputTranscription;
-            const inputTrans = message.serverContent?.inputTranscription;
+            // Check existence safely before accessing
+            if (message.serverContent) {
+                const outputTrans = message.serverContent.outputTranscription;
+                const inputTrans = message.serverContent.inputTranscription;
 
-            if (outputTrans?.text) {
-                currentOutputTranscriptionRef.current += outputTrans.text;
-                updateMessages(currentOutputTranscriptionRef.current, 'model', false);
-            }
-
-            if (inputTrans?.text) {
-                currentInputTranscriptionRef.current += inputTrans.text;
-                // Only update if we didn't just manually send this
-                updateMessages(currentInputTranscriptionRef.current, 'user', false);
-            }
-
-            // Handle Turn Completion
-            if (message.serverContent?.turnComplete) {
-                // Finalize messages
-                if (currentInputTranscriptionRef.current) {
-                    updateMessages(currentInputTranscriptionRef.current, 'user', true);
-                    currentInputTranscriptionRef.current = '';
+                if (outputTrans?.text) {
+                    currentOutputTranscriptionRef.current += outputTrans.text;
+                    updateMessages(currentOutputTranscriptionRef.current, 'model', false);
                 }
-                if (currentOutputTranscriptionRef.current) {
-                    updateMessages(currentOutputTranscriptionRef.current, 'model', true);
-                    currentOutputTranscriptionRef.current = '';
-                }
-            }
 
-            if (message.serverContent?.interrupted) {
-              console.log("Interrupted - clearing audio queue");
-              audioSourcesRef.current.forEach((src) => {
-                try { src.stop(); } catch(e) {}
-              });
-              audioSourcesRef.current.clear();
-              if (outputAudioContextRef.current) {
-                  nextStartTimeRef.current = outputAudioContextRef.current.currentTime;
-              }
-              
-              // Also finalize any pending model text as interrupted
-              if (currentOutputTranscriptionRef.current) {
-                   updateMessages(currentOutputTranscriptionRef.current + " ...", 'model', true);
-                   currentOutputTranscriptionRef.current = '';
-              }
+                if (inputTrans?.text) {
+                    currentInputTranscriptionRef.current += inputTrans.text;
+                    updateMessages(currentInputTranscriptionRef.current, 'user', false);
+                }
+
+                if (message.serverContent.turnComplete) {
+                    if (currentInputTranscriptionRef.current) {
+                        updateMessages(currentInputTranscriptionRef.current, 'user', true);
+                        currentInputTranscriptionRef.current = '';
+                    }
+                    if (currentOutputTranscriptionRef.current) {
+                        updateMessages(currentOutputTranscriptionRef.current, 'model', true);
+                        currentOutputTranscriptionRef.current = '';
+                    }
+                }
+
+                if (message.serverContent.interrupted) {
+                  console.log("Interrupted - clearing audio queue");
+                  audioSourcesRef.current.forEach((src) => {
+                    try { src.stop(); } catch(e) {}
+                  });
+                  audioSourcesRef.current.clear();
+                  if (outputAudioContextRef.current) {
+                      nextStartTimeRef.current = outputAudioContextRef.current.currentTime;
+                  }
+                  
+                  if (currentOutputTranscriptionRef.current) {
+                       updateMessages(currentOutputTranscriptionRef.current + " ...", 'model', true);
+                       currentOutputTranscriptionRef.current = '';
+                  }
+                }
             }
           },
           onclose: () => {
@@ -450,7 +454,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
           },
           systemInstruction: systemInstruction,
-          // Enable transcription
+          // Explicitly pass empty objects to enable transcription
           inputAudioTranscription: {},
           outputAudioTranscription: {},
         }
