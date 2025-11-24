@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { LanguageConfig, SessionStatus } from '../types';
+import { LanguageConfig, SessionStatus, ChatMessage } from '../types';
 import { createPcmBlob, base64ToBytes, decodeAudioData } from '../utils/audioUtils';
 
 // Constants for audio settings
@@ -11,6 +11,7 @@ const BUFFER_SIZE = 4096;
 export const useGeminiLive = (config: LanguageConfig | null) => {
   const [status, setStatus] = useState<SessionStatus>(SessionStatus.IDLE);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   
   // Refs for audio handling to avoid re-renders
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -21,6 +22,10 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Refs for transcription accumulation
+  const currentInputTranscriptionRef = useRef<string>('');
+  const currentOutputTranscriptionRef = useRef<string>('');
 
   const cleanup = useCallback(() => {
     // Stop all playing audio
@@ -48,6 +53,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     
     setStatus(SessionStatus.IDLE);
     nextStartTimeRef.current = 0;
+    currentInputTranscriptionRef.current = '';
+    currentOutputTranscriptionRef.current = '';
   }, []);
 
   const getDifficultyInstruction = (config: LanguageConfig) => {
@@ -180,12 +187,123 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     }
   };
 
+  const updateMessages = (newText: string, role: 'user' | 'model', isFinal: boolean) => {
+    setMessages(prev => {
+      const newArr = [...prev];
+      
+      // DEDUPLICATION SAFEGUARD:
+      // If we are trying to add a FINAL user message, check if the VERY LAST message
+      // is already a final user message with the EXACT SAME text.
+      // This prevents double rendering if the system echoes text or if state updates race.
+      if (isFinal && role === 'user') {
+          const lastMsg = newArr[newArr.length - 1];
+          if (lastMsg && lastMsg.role === 'user' && lastMsg.text === newText && !lastMsg.isTentative) {
+              return prev; // Ignore duplicate
+          }
+      }
+
+      // SEARCH BACKWARDS: Find the last tentative message of THIS specific role.
+      // This fixes the duplication bug where a Model message appearing before User finalization
+      // would cause the User message to be duplicated instead of updated.
+      let targetIndex = -1;
+      for (let i = newArr.length - 1; i >= 0; i--) {
+        if (newArr[i].role === role && newArr[i].isTentative) {
+          targetIndex = i;
+          break;
+        }
+      }
+
+      // If we found a tentative message for this role, update it
+      if (targetIndex !== -1) {
+        if (isFinal) {
+           newArr[targetIndex] = { 
+             ...newArr[targetIndex], 
+             text: newText || newArr[targetIndex].text, 
+             isTentative: false 
+           };
+        } else {
+           newArr[targetIndex] = { 
+             ...newArr[targetIndex], 
+             text: newText 
+           };
+        }
+        return newArr;
+      }
+
+      // If no tentative message exists, create a new one
+      if (newText) {
+        return [
+          ...prev,
+          {
+            id: Date.now().toString() + Math.random().toString().slice(2,5), // Unique ID to avoid collision
+            role,
+            text: newText,
+            isTentative: !isFinal
+          }
+        ];
+      }
+
+      return prev;
+    });
+  };
+
+  const sendText = useCallback(async (text: string) => {
+    if (sessionPromiseRef.current) {
+        // 1. Interrupt current audio playback immediately
+        audioSourcesRef.current.forEach((source) => {
+            try { source.stop(); } catch (e) {}
+        });
+        audioSourcesRef.current.clear();
+        
+        // Reset timestamp for next audio chunk
+        if (outputAudioContextRef.current) {
+            nextStartTimeRef.current = outputAudioContextRef.current.currentTime;
+        }
+
+        try {
+            const session = await sessionPromiseRef.current;
+            
+            // 2. Optimistically add the USER message as FINAL immediately
+            // We use a unique ID. Logic in updateMessages will prevent duplication if echo occurs.
+            setMessages(prev => [...prev, {
+                id: Date.now().toString(),
+                role: 'user',
+                text: text,
+                isTentative: false
+            }]);
+
+            const clientContent = { 
+                turns: [{ 
+                    role: 'user', 
+                    parts: [{ text: text }] 
+                }], 
+                turnComplete: true 
+            };
+
+            // 3. Send text to Gemini Live
+            // We check for method existence to avoid crashes on different SDK versions
+            if (typeof session.send === 'function') {
+                session.send({ clientContent });
+            } else if (typeof (session as any).sendClientContent === 'function') {
+                // Fallback for some SDK versions
+                (session as any).sendClientContent(clientContent);
+            } else {
+                console.warn("Text messaging method not found on session object. This feature might not be supported in the current environment.");
+                // We do not throw, to keep the session alive.
+            }
+        } catch (e) {
+            console.error("Failed to send text:", e);
+        }
+    }
+  }, []);
+
   const connect = useCallback(async () => {
     if (!config) return;
     
     try {
       setStatus(SessionStatus.CONNECTING);
       setErrorMessage('');
+      setMessages([]); // Reset messages on new connection
 
       const apiKey = process.env.API_KEY;
       if (!apiKey) {
@@ -242,8 +360,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             scriptProcessorRef.current = processor;
           },
           onmessage: async (message: LiveServerMessage) => {
+            // Handle Audio
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            
             if (base64Audio && outputAudioContextRef.current) {
               nextStartTimeRef.current = Math.max(
                 nextStartTimeRef.current,
@@ -271,13 +389,49 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               audioSourcesRef.current.add(source);
             }
 
+            // Handle Transcriptions
+            const outputTrans = message.serverContent?.outputTranscription;
+            const inputTrans = message.serverContent?.inputTranscription;
+
+            if (outputTrans?.text) {
+                currentOutputTranscriptionRef.current += outputTrans.text;
+                updateMessages(currentOutputTranscriptionRef.current, 'model', false);
+            }
+
+            if (inputTrans?.text) {
+                currentInputTranscriptionRef.current += inputTrans.text;
+                // Only update if we didn't just manually send this
+                updateMessages(currentInputTranscriptionRef.current, 'user', false);
+            }
+
+            // Handle Turn Completion
+            if (message.serverContent?.turnComplete) {
+                // Finalize messages
+                if (currentInputTranscriptionRef.current) {
+                    updateMessages(currentInputTranscriptionRef.current, 'user', true);
+                    currentInputTranscriptionRef.current = '';
+                }
+                if (currentOutputTranscriptionRef.current) {
+                    updateMessages(currentOutputTranscriptionRef.current, 'model', true);
+                    currentOutputTranscriptionRef.current = '';
+                }
+            }
+
             if (message.serverContent?.interrupted) {
               console.log("Interrupted - clearing audio queue");
               audioSourcesRef.current.forEach((src) => {
                 try { src.stop(); } catch(e) {}
               });
               audioSourcesRef.current.clear();
-              nextStartTimeRef.current = outputAudioContextRef.current?.currentTime || 0;
+              if (outputAudioContextRef.current) {
+                  nextStartTimeRef.current = outputAudioContextRef.current.currentTime;
+              }
+              
+              // Also finalize any pending model text as interrupted
+              if (currentOutputTranscriptionRef.current) {
+                   updateMessages(currentOutputTranscriptionRef.current + " ...", 'model', true);
+                   currentOutputTranscriptionRef.current = '';
+              }
             }
           },
           onclose: () => {
@@ -296,6 +450,9 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
           },
           systemInstruction: systemInstruction,
+          // Enable transcription
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
         }
       });
 
@@ -315,6 +472,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     status,
     connect,
     disconnect: cleanup,
-    errorMessage
+    errorMessage,
+    messages,
+    sendText
   };
 };

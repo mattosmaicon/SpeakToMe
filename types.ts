@@ -21,3 +21,10 @@ export interface AudioContextState {
   inputAudioContext: AudioContext | null;
   outputAudioContext: AudioContext | null;
 }
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'model';
+  text: string;
+  isTentative?: boolean; // True while the message is being transcribed
+}
