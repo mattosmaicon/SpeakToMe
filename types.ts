@@ -21,11 +21,3 @@ export interface AudioContextState {
   inputAudioContext: AudioContext | null;
   outputAudioContext: AudioContext | null;
 }
-
-export interface ChatMessage {
-  id: string;
-  role: 'user' | 'model' | 'system';
-  text: string;
-  isFinal: boolean;
-  timestamp: number;
-}

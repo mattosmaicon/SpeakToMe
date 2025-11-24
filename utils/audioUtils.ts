@@ -38,7 +38,7 @@ export async function decodeAudioData(
   return buffer;
 }
 
-export function createPcmBlob(data: Float32Array, sampleRate: number): Blob {
+export function createPcmBlob(data: Float32Array): Blob {
   const l = data.length;
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
@@ -47,7 +47,6 @@ export function createPcmBlob(data: Float32Array, sampleRate: number): Blob {
   }
   return {
     data: bytesToBase64(new Uint8Array(int16.buffer)),
-    // Inform the API of the exact sample rate captured by the hardware
-    mimeType: `audio/pcm;rate=${sampleRate}`,
+    mimeType: 'audio/pcm;rate=16000',
   };
 }

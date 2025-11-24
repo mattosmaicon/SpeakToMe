@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect } from 'react';
 import { LanguageConfig, SessionStatus, UILanguage } from '../types';
 import { useGeminiLive } from '../hooks/useGeminiLive';
 import { Mic, MicOff, X, Activity, Loader2, Sparkles, Brain, Languages, MessageSquare } from 'lucide-react';
@@ -11,9 +11,7 @@ interface ActiveSessionProps {
 }
 
 const ActiveSession: React.FC<ActiveSessionProps> = ({ config, onEndSession, uiLanguage }) => {
-  const { status, connect, disconnect, errorMessage, messages } = useGeminiLive(config);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  
+  const { status, connect, disconnect, errorMessage } = useGeminiLive(config);
   const t = TRANSLATIONS[uiLanguage].active;
   const tLabels = TRANSLATIONS[uiLanguage].modeLabels;
 
@@ -21,12 +19,7 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ config, onEndSession, uiL
   useEffect(() => {
     connect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); 
-
-  // Auto-scroll to bottom of chat
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, []); // Only run once on mount
 
   const isConnected = status === SessionStatus.CONNECTED;
 
@@ -45,7 +38,7 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ config, onEndSession, uiL
 
   if (errorMessage) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-6 text-center bg-slate-900">
+      <div className="flex flex-col items-center justify-center h-full p-6 text-center">
         <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
           <MicOff className="w-8 h-8 text-red-500" />
         </div>
@@ -62,112 +55,88 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ config, onEndSession, uiL
   }
 
   return (
-    <div className="flex flex-col h-full w-full bg-slate-900 overflow-hidden">
+    <div className="relative flex flex-col items-center justify-between h-full w-full py-12 px-6">
       
       {/* Header */}
-      <div className="flex-none w-full bg-slate-900/95 backdrop-blur-sm border-b border-slate-800 z-10 p-4">
-        <div className="flex justify-between items-center max-w-2xl mx-auto">
-          <div className="flex items-center gap-3">
-             {/* Small Visualizer Status */}
-             <div className={`relative w-10 h-10 rounded-full flex items-center justify-center transition-all ${isConnected ? 'bg-indigo-600' : 'bg-slate-700'}`}>
-                {status === SessionStatus.CONNECTING ? (
-                  <Loader2 className="w-5 h-5 text-white animate-spin" />
-                ) : isConnected ? (
-                  <>
-                    <div className="absolute inset-0 bg-indigo-500 rounded-full animate-ping opacity-20"></div>
-                    <Mic className="w-5 h-5 text-white" />
-                  </>
-                ) : (
-                  <MicOff className="w-5 h-5 text-slate-400" />
-                )}
-             </div>
-             <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  {getModeIcon()}
-                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{getModeLabel()}</span>
-                </div>
-                <span className="text-sm font-bold text-indigo-100">{config.targetLanguage}</span>
-             </div>
+      <div className="w-full flex justify-between items-center max-w-md">
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2 mb-1">
+            {getModeIcon()}
+            <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{getModeLabel()}</span>
           </div>
-          
-          <div className="flex items-center gap-2">
-             <button
-              onClick={isConnected ? disconnect : connect}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
-                isConnected 
-                  ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' 
-                  : 'bg-indigo-600 text-white hover:bg-indigo-500'
-              }`}
-            >
-              {isConnected ? t.end : t.reconnect}
-            </button>
-            <button 
-              onClick={onEndSession}
-              className="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <span className="text-lg font-bold text-indigo-300">{config.targetLanguage}</span>
+        </div>
+        <button 
+          onClick={onEndSession}
+          className="p-2 rounded-full hover:bg-slate-800 text-slate-400 hover:text-white transition-colors"
+        >
+          <X className="w-6 h-6" />
+        </button>
+      </div>
+
+      {/* Visualizer / Center Status */}
+      <div className="flex flex-col items-center justify-center flex-1 w-full max-w-md">
+        
+        {config.mode === 'critical_thinking' && config.topicOrWords && (
+          <div className="mb-8 w-full bg-slate-800/60 border border-slate-700 p-4 rounded-xl backdrop-blur-sm">
+            <h4 className="text-xs text-pink-400 font-bold uppercase mb-1">{t.currentFocus}</h4>
+            <p className="text-slate-200 text-sm font-medium leading-relaxed">
+              "{config.topicOrWords}"
+            </p>
           </div>
-        </div>
-      </div>
+        )}
 
-      {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
-        <div className="max-w-2xl mx-auto space-y-4 min-h-full flex flex-col justify-end pb-4">
-          {/* Empty State / Welcome */}
-          {messages.length === 0 && (
-            <div className="flex flex-col items-center justify-center flex-1 text-center opacity-60 py-10">
-              <div className="w-20 h-20 bg-gradient-to-br from-indigo-600/20 to-blue-600/20 rounded-full flex items-center justify-center mb-4">
-                <Sparkles className="w-8 h-8 text-indigo-400" />
-              </div>
-              <p className="text-slate-400 text-sm">{t.listening}</p>
-              {config.mode === 'critical_thinking' && config.topicOrWords && (
-                <p className="text-pink-400 text-xs font-bold mt-2 bg-pink-500/10 px-3 py-1 rounded-full">
-                  Topic: {config.topicOrWords}
-                </p>
-              )}
+        {status === SessionStatus.CONNECTING && (
+          <div className="flex flex-col items-center gap-4">
+            <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
+            <p className="text-indigo-300 animate-pulse">{t.connecting}</p>
+          </div>
+        )}
+
+        {isConnected && (
+          <div className="relative">
+            {/* Pulsing Effect */}
+            <div className="absolute inset-0 bg-indigo-500/20 rounded-full animate-soft-pulse blur-xl"></div>
+            
+            <div className="relative w-40 h-40 bg-gradient-to-br from-indigo-600 to-blue-600 rounded-full flex items-center justify-center shadow-2xl shadow-indigo-500/30">
+              <Mic className="w-16 h-16 text-white" />
             </div>
-          )}
 
-          {messages.map((msg, index) => {
-            const isUser = msg.role === 'user';
-            return (
-              <div 
-                key={msg.id || index} 
-                className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'}`}
-              >
-                <div 
-                  className={`max-w-[80%] px-5 py-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
-                    isUser 
-                      ? 'bg-indigo-600 text-white rounded-tr-none' 
-                      : 'bg-slate-800 text-slate-100 border border-slate-700 rounded-tl-none'
-                  } ${!msg.isFinal && 'opacity-70'}`}
-                >
-                  {msg.text}
-                  {!msg.isFinal && <span className="animate-pulse">...</span>}
-                </div>
+            <div className="mt-12 text-center space-y-2">
+              <div className="flex items-center justify-center gap-2 text-emerald-400 font-medium bg-emerald-400/10 px-4 py-1 rounded-full w-fit mx-auto">
+                <Activity className="w-4 h-4" />
+                <span>{t.liveSession}</span>
               </div>
-            );
-          })}
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
-
-      {/* Input Area */}
-      <div className="flex-none bg-slate-900 p-4 border-t border-slate-800">
-         <div className="max-w-2xl mx-auto relative flex justify-center">
-            <div className="flex items-center gap-3 px-6 py-3 rounded-full bg-slate-800 border border-slate-700">
-               <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
-               <p className="text-xs font-medium text-slate-300">
-                  {isConnected ? t.liveSession : t.connectionIssue}
-               </p>
-               {isConnected && (
-                 <span className="text-xs text-slate-500 border-l border-slate-600 pl-3">Voice Mode Active</span>
-               )}
+              <p className="text-slate-400 text-sm max-w-[200px]">
+                {config.mode === 'translator' 
+                  ? t.translateHint(config.nativeLanguage)
+                  : t.listening}
+              </p>
             </div>
-         </div>
+          </div>
+        )}
+
       </div>
 
+      {/* Footer Controls */}
+      <div className="w-full max-w-md flex flex-col gap-4">
+        {isConnected && (
+            <div className="text-center text-xs text-slate-600">
+               {t.interruptHint}
+            </div>
+        )}
+        
+        <button
+          onClick={isConnected ? disconnect : connect}
+          className={`w-full py-4 rounded-xl font-semibold transition-all ${
+            isConnected 
+              ? 'bg-red-500/10 text-red-400 hover:bg-red-500/20' 
+              : 'bg-indigo-600 text-white hover:bg-indigo-500'
+          }`}
+        >
+          {isConnected ? t.end : t.reconnect}
+        </button>
+      </div>
     </div>
   );
 };

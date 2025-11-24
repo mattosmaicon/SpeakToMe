@@ -56,17 +56,16 @@ export const TRANSLATIONS = {
       close: "Close"
     },
     active: {
-      end: "End",
+      end: "End Conversation",
       reconnect: "Reconnect",
-      listening: "Listening... Speak or type naturally.",
+      listening: "Listening... Speak naturally.",
       translateHint: (lang: string) => `Translating between selected languages...`,
       interruptHint: "AI will interrupt to correct pronunciation & grammar.",
       connectionIssue: "Connection Issue",
       goBack: "Go Back",
-      liveSession: "Microphone Active",
+      liveSession: "Live Session",
       currentFocus: "Current Focus",
-      connecting: "Connecting...",
-      typeMessage: "Type a message..."
+      connecting: "Connecting to AI..."
     },
     modeLabels: {
       free_chat: "Free Conversation",
@@ -130,17 +129,16 @@ export const TRANSLATIONS = {
       close: "Fechar"
     },
     active: {
-      end: "Sair",
+      end: "Encerrar Conversa",
       reconnect: "Reconectar",
-      listening: "Ouvindo... Fale ou digite.",
+      listening: "Ouvindo... Fale naturalmente.",
       translateHint: (lang: string) => `Traduzindo entre os idiomas selecionados...`,
       interruptHint: "A IA irá interromper para corrigir pronúncia e gramática.",
       connectionIssue: "Problema de Conexão",
       goBack: "Voltar",
-      liveSession: "Microfone Ativo",
+      liveSession: "Sessão Ao Vivo",
       currentFocus: "Foco Atual",
-      connecting: "Conectando...",
-      typeMessage: "Digite uma mensagem..."
+      connecting: "Conectando à IA..."
     },
     modeLabels: {
       free_chat: "Conversação Livre",
