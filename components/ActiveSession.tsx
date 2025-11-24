@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { LanguageConfig, SessionStatus, UILanguage } from '../types';
 import { useGeminiLive } from '../hooks/useGeminiLive';
-import { Mic, MicOff, X, Activity, Loader2, Sparkles, Brain, Languages, MessageSquare, Send, ArrowUp } from 'lucide-react';
+import { Mic, MicOff, X, Activity, Loader2, Sparkles, Brain, Languages, MessageSquare } from 'lucide-react';
 import { TRANSLATIONS } from '../utils/translations';
 
 interface ActiveSessionProps {
@@ -11,8 +11,7 @@ interface ActiveSessionProps {
 }
 
 const ActiveSession: React.FC<ActiveSessionProps> = ({ config, onEndSession, uiLanguage }) => {
-  const { status, connect, disconnect, errorMessage, messages, sendTextMessage } = useGeminiLive(config);
-  const [inputText, setInputText] = useState('');
+  const { status, connect, disconnect, errorMessage, messages } = useGeminiLive(config);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   
   const t = TRANSLATIONS[uiLanguage].active;
@@ -28,14 +27,6 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ config, onEndSession, uiL
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  const handleSendMessage = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (inputText.trim()) {
-      sendTextMessage(inputText);
-      setInputText('');
-    }
-  };
 
   const isConnected = status === SessionStatus.CONNECTED;
 
@@ -164,34 +155,15 @@ const ActiveSession: React.FC<ActiveSessionProps> = ({ config, onEndSession, uiL
 
       {/* Input Area */}
       <div className="flex-none bg-slate-900 p-4 border-t border-slate-800">
-         <div className="max-w-2xl mx-auto relative">
-            <form onSubmit={handleSendMessage} className="relative flex items-center gap-2">
-               <div className="relative flex-1">
-                 <input
-                    type="text"
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    placeholder={t.typeMessage}
-                    disabled={!isConnected}
-                    className="w-full bg-slate-800 border border-slate-700 text-white rounded-full pl-5 pr-12 py-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all disabled:opacity-50 placeholder:text-slate-500"
-                 />
-                 <div className="absolute right-2 top-1/2 -translate-y-1/2">
-                    <button 
-                      type="submit"
-                      disabled={!inputText.trim() || !isConnected}
-                      className="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-500 disabled:opacity-50 disabled:bg-slate-700 transition-all"
-                    >
-                      <ArrowUp className="w-5 h-5" />
-                    </button>
-                 </div>
-               </div>
-            </form>
-            
-            <div className="text-center mt-2">
-               <p className="text-[10px] text-slate-500 flex items-center justify-center gap-1">
-                  <Activity className="w-3 h-3" />
+         <div className="max-w-2xl mx-auto relative flex justify-center">
+            <div className="flex items-center gap-3 px-6 py-3 rounded-full bg-slate-800 border border-slate-700">
+               <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`}></div>
+               <p className="text-xs font-medium text-slate-300">
                   {isConnected ? t.liveSession : t.connectionIssue}
                </p>
+               {isConnected && (
+                 <span className="text-xs text-slate-500 border-l border-slate-600 pl-3">Voice Mode Active</span>
+               )}
             </div>
          </div>
       </div>

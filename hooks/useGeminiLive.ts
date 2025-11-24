@@ -3,9 +3,9 @@ import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
 import { LanguageConfig, SessionStatus, ChatMessage } from '../types';
 import { createPcmBlob, base64ToBytes, decodeAudioData } from '../utils/audioUtils';
 
-// Constants for audio settings
-const INPUT_SAMPLE_RATE = 16000;
+// Constants
 const OUTPUT_SAMPLE_RATE = 24000;
+// We no longer force INPUT_SAMPLE_RATE. We use the system default to avoid production errors.
 const BUFFER_SIZE = 4096;
 
 // Helper to clean up template literals and remove extra whitespace/newlines
@@ -117,7 +117,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
   };
 
   const getSystemInstruction = (config: LanguageConfig) => {
-    // Specialized instruction for Translator mode
     if (config.mode === 'translator') {
       return cleanPrompt(`
           SYSTEM INSTRUCTION: SIMULTANEOUS INTERPRETER.
@@ -126,12 +125,10 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
           1. Listen strictly.
           2. Detect language automatically.
           3. Translate the full meaning instantly to the other language.
-          4. Maintain the tone (formal, angry, happy) of the speaker.
+          4. Maintain the tone.
           OUTPUT RULES:
-          - DO NOT add "Here is the translation". Just speak the translation.
-          - DO NOT explain the grammar.
-          - DO NOT engage in conversation.
-          - If the audio is unclear, ask "Please repeat" in the target language.
+          - Just speak the translation.
+          - NO explanations.
         `);
     }
 
@@ -141,32 +138,19 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     switch (config.mode) {
       case 'reconstruction':
         modeInstruction = `
-          MODE: UPGRADE MY SENTENCE (Drill Mode).
-          YOUR ROLE: You are a strict but helpful diction coach.
-          THE LOOP:
-          1. Wait for the user to say a phrase or sentence (even a broken one).
-          2. Identify the intended meaning.
-          3. Generate the "Ideal Native Version" suitable for the user's selected difficulty level.
-          4. Say: "Try this: [Insert Ideal Version]".
-          5. Wait for the user to repeat it.
-          6. If they repeat correctly, say "Perfect" and ask for the next thought.
-          7. If they repeat poorly, emphasize the specific word they missed and ask them to try again.
-          NOTE: Keep explanations to absolute minimum. Focus on repetition and muscle memory.
+          MODE: UPGRADE MY SENTENCE.
+          ROLE: Diction coach.
+          LOOP: Wait for user phrase -> Identify meaning -> Generate Ideal Native Version -> Ask user to try "Ideal Version" -> Verify repetition.
+          Keep explanations minimal.
         `;
         break;
       
       case 'critical_thinking':
         modeInstruction = `
-          MODE: CRITICAL THINKING / DEBATE.
-          TOPIC: "${config.topicOrWords || 'General Philosophy'}".
-          YOUR ROLE: Socratic Challenger & Devil's Advocate.
-          INTERACTION RULES:
-          1. Take a controversial or opposing stance to whatever the user says about the topic.
-          2. Use the Socratic Method: Ask "Why?", "How do you know?", "What about...?"
-          3. Challenge logical fallacies.
-          4. DO NOT accept "I don't know" or short answers. Push the user to elaborate.
-          5. While they argue, silently track their language mistakes. After they finish a point, briefly correct ONE major error, then immediately fire the next counter-argument.
-          GOAL: Force the user to construct complex arguments under pressure.
+          MODE: DEBATE.
+          TOPIC: "${config.topicOrWords || 'Philosophy'}".
+          ROLE: Devil's Advocate.
+          RULES: Challenge user stances. Use Socratic method. Correct one error per turn.
         `;
         break;
 
@@ -174,12 +158,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       default:
         modeInstruction = `
           MODE: FREE CONVERSATION.
-          YOUR ROLE: Engaging Conversationalist & Guide.
-          INTERACTION RULES:
-          1. Ask open-ended questions (Who, What, Where, When, Why) to keep the user talking.
-          2. Apply the "80/20 Rule": The user should speak 80% of the time.
-          3. If the conversation stalls, introduce a culturally relevant topic regarding ${config.targetLanguage} culture.
-          4. Correction Policy: adhere strictly to the Difficulty Level settings defined above.
+          RULES: Ask open-ended questions. User speaks 80%.
         `;
         break;
     }
@@ -190,7 +169,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
   const sendTextMessage = useCallback((text: string) => {
     if (!sessionPromiseRef.current) return;
     
-    // Optimistically add user message
+    // Optimistically add user message to UI
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
@@ -202,9 +181,12 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
 
     sessionPromiseRef.current.then((session: any) => {
       try {
-        session.sendRealtimeInput({ 
-          content: [{ role: "user", parts: [{ text }] }] 
-        });
+        // Safe check for the send method
+        if (typeof session.send === 'function') {
+          session.send([{ text: text }], true);
+        } else {
+          console.warn("Text sending is not supported in this version of the Live API.");
+        }
       } catch (e) {
         console.error("Error sending text", e);
       }
@@ -221,12 +203,17 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
 
       const apiKey = process.env.API_KEY;
       if (!apiKey) {
-        throw new Error("API Key not found. Please check your settings.");
+        throw new Error("API Key not found.");
       }
 
       // Initialize Audio Contexts
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      inputAudioContextRef.current = new AudioContextClass({ sampleRate: INPUT_SAMPLE_RATE });
+      
+      // INPUT: Let browser decide sample rate (avoids errors on some hardware)
+      inputAudioContextRef.current = new AudioContextClass();
+      const inputSampleRate = inputAudioContextRef.current.sampleRate;
+
+      // OUTPUT: Gemini usually returns 24000Hz.
       outputAudioContextRef.current = new AudioContextClass({ sampleRate: OUTPUT_SAMPLE_RATE });
 
       if (inputAudioContextRef.current.state === 'suspended') {
@@ -259,7 +246,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              const pcmBlob = createPcmBlob(inputData);
+              // Pass the ACTUAL hardware sample rate to the blob creator
+              const pcmBlob = createPcmBlob(inputData, inputSampleRate);
               
               if (sessionPromiseRef.current) {
                 sessionPromiseRef.current.then((session: any) => {
@@ -285,10 +273,13 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             let textUpdate = '';
             let role: 'user' | 'model' | null = null;
 
+            // Check for serverContent transcription (Model)
             if (message.serverContent?.outputTranscription) {
               textUpdate = message.serverContent.outputTranscription.text;
               role = 'model';
-            } else if (message.serverContent?.inputTranscription) {
+            } 
+            // Check for serverContent transcription (User) - this confirms the model heard us
+            else if (message.serverContent?.inputTranscription) {
               textUpdate = message.serverContent.inputTranscription.text;
               role = 'user';
             }
@@ -297,13 +288,13 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               setMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
                 
-                // If the last message matches the role and isn't final, append to it
+                // Append to existing message if role matches and it's not final
                 if (lastMsg && lastMsg.role === role && !lastMsg.isFinal) {
                   const updatedMsg = { ...lastMsg, text: lastMsg.text + textUpdate };
                   return [...prev.slice(0, -1), updatedMsg];
                 } 
                 
-                // Otherwise create new message (unless it's an empty update)
+                // Don't create empty messages
                 if (!textUpdate.trim()) return prev;
 
                 return [...prev, {
@@ -316,12 +307,12 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               });
             }
 
-            // Mark messages as final when turn completes or interrupted
+            // Mark messages as final
             if (message.serverContent?.turnComplete || message.serverContent?.interrupted) {
               setMessages(prev => prev.map(m => ({ ...m, isFinal: true })));
             }
 
-            // --- Handle Audio ---
+            // --- Handle Audio Output ---
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             
             if (base64Audio && outputAudioContextRef.current) {
@@ -356,7 +347,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             }
 
             if (message.serverContent?.interrupted) {
-              console.log("Interrupted - clearing audio queue");
               audioSourcesRef.current.forEach((src) => {
                 try { src.stop(); } catch(e) {}
               });
@@ -376,13 +366,12 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
         },
         config: {
           responseModalities: [Modality.AUDIO],
-          // Enable bi-directional transcription
           inputAudioTranscription: {}, 
           outputAudioTranscription: {},
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
           },
-          systemInstruction: { parts: [{ text: systemInstructionText }] },
+          systemInstruction: systemInstructionText,
         }
       });
 
