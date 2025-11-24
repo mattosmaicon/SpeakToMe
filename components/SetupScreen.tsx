@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LanguageConfig, SessionMode, UILanguage, FluencyLevel } from '../types';
-import { Mic, Globe, ArrowRight, Sparkles, Brain, Languages, MessageSquare, ChevronLeft, Settings, X, Feather, Zap, Flame, Crown, Lock, Download } from 'lucide-react';
+import { Mic, Globe, ArrowRight, Sparkles, Brain, Languages, MessageSquare, ChevronLeft, Settings, X, Feather, Zap, Flame, Crown, Lock, Download, Briefcase } from 'lucide-react';
 import { TRANSLATIONS, DISPLAY_LANGUAGES } from '../utils/translations';
 
 interface SetupScreenProps {
@@ -13,6 +13,7 @@ const MODES_ICONS = {
   free_chat: MessageSquare,
   reconstruction: Sparkles,
   critical_thinking: Brain,
+  interview: Briefcase,
   translator: Languages,
 };
 
@@ -327,7 +328,7 @@ const SetupScreen: React.FC<SetupScreenProps> = ({ onStart, uiLanguage, setUiLan
               })}
             </div>
 
-            {selectedMode === 'critical_thinking' && (
+            {(selectedMode === 'critical_thinking' || selectedMode === 'interview') && (
                <div className="space-y-2 pt-2 animate-in fade-in zoom-in-95">
                <label className="text-sm font-medium text-indigo-300 flex items-center gap-2">
                   {t.topicLabel}

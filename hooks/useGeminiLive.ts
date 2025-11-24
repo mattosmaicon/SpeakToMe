@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { LanguageConfig, SessionStatus } from '../types';
+import { LanguageConfig, SessionStatus, ChatMessage } from '../types';
 import { createPcmBlob, base64ToBytes, decodeAudioData } from '../utils/audioUtils';
 
 // Constants for audio settings
@@ -16,6 +16,8 @@ const cleanPrompt = (text: string) => {
 export const useGeminiLive = (config: LanguageConfig | null) => {
   const [status, setStatus] = useState<SessionStatus>(SessionStatus.IDLE);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [currentVolume, setCurrentVolume] = useState<number>(0);
   
   // Refs for audio handling to avoid re-renders
   const inputAudioContextRef = useRef<AudioContext | null>(null);
@@ -26,7 +28,12 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
 
+  // Refs for Transcription Handling
+  const currentInputTranscriptionRef = useRef<string>('');
+  const currentOutputTranscriptionRef = useRef<string>('');
+  
   const cleanup = useCallback(() => {
     // Stop all playing audio
     audioSourcesRef.current.forEach((source) => {
@@ -52,7 +59,11 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     sessionPromiseRef.current = null;
     
     setStatus(SessionStatus.IDLE);
+    setMessages([]);
+    currentInputTranscriptionRef.current = '';
+    currentOutputTranscriptionRef.current = '';
     nextStartTimeRef.current = 0;
+    setCurrentVolume(0);
   }, []);
 
   const getDifficultyInstruction = (config: LanguageConfig) => {
@@ -169,6 +180,19 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
         `;
         break;
 
+      case 'interview':
+        modeInstruction = `
+          MODE: JOB INTERVIEW / SCENARIO SIMULATION.
+          CONTEXT: "${config.topicOrWords || 'General Job Interview'}".
+          YOUR ROLE: Professional Interviewer or Scenario Actor.
+          INTERACTION RULES:
+          1. Conduct a realistic roleplay based on the Context.
+          2. Ask relevant, probing questions one by one.
+          3. If the user makes a significant mistake (grammar/cultural), briefly step out of character to correct it using [Square Brackets], then immediately resume character.
+          4. Maintain the professional demeanor appropriate for the scenario.
+        `;
+        break;
+
       case 'free_chat':
       default:
         modeInstruction = `
@@ -216,8 +240,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       const ai = new GoogleGenAI({ apiKey });
-      
-      // CRITICAL FIX: Ensure clean string and wrap in parts object for production stability
       const systemInstructionText = getSystemInstruction(config);
       
       sessionPromiseRef.current = ai.live.connect({
@@ -232,10 +254,24 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             const source = inputAudioContextRef.current.createMediaStreamSource(streamRef.current);
             const processor = inputAudioContextRef.current.createScriptProcessor(BUFFER_SIZE, 1, 1);
             
+            // Analyser for volume visualization
+            const analyser = inputAudioContextRef.current.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            analyserRef.current = analyser;
+
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               const pcmBlob = createPcmBlob(inputData);
               
+              // Volume calc
+              if (analyserRef.current) {
+                const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+                analyserRef.current.getByteFrequencyData(dataArray);
+                const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
+                setCurrentVolume(avg); // Simple update, might want to throttle in real prod
+              }
+
               if (sessionPromiseRef.current) {
                 sessionPromiseRef.current.then((session: any) => {
                   try {
@@ -254,9 +290,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             scriptProcessorRef.current = processor;
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Safe access to audio data
+            // 1. Handle Audio
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            
             if (base64Audio && outputAudioContextRef.current) {
               try {
                 nextStartTimeRef.current = Math.max(
@@ -288,6 +323,76 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               }
             }
 
+            // 2. Handle Transcription
+            // Accumulate input (User)
+            if (message.serverContent?.inputTranscription) {
+              const text = message.serverContent.inputTranscription.text;
+              currentInputTranscriptionRef.current += text;
+              
+              // Optimistically update UI for current user speech
+              setMessages(prev => {
+                const existing = prev.filter(m => m.id !== 'temp-user');
+                return [...existing, {
+                  id: 'temp-user',
+                  role: 'user',
+                  text: currentInputTranscriptionRef.current,
+                  isFinal: false
+                }];
+              });
+            }
+
+            // Accumulate output (Model)
+            if (message.serverContent?.outputTranscription) {
+              const text = message.serverContent.outputTranscription.text;
+              currentOutputTranscriptionRef.current += text;
+
+              // Optimistically update UI for current model speech
+              setMessages(prev => {
+                const existing = prev.filter(m => m.id !== 'temp-model');
+                return [...existing, {
+                  id: 'temp-model',
+                  role: 'model',
+                  text: currentOutputTranscriptionRef.current,
+                  isFinal: false
+                }];
+              });
+            }
+
+            // 3. Handle Turn Complete (Solidify transcripts)
+            if (message.serverContent?.turnComplete) {
+              const userText = currentInputTranscriptionRef.current.trim();
+              const modelText = currentOutputTranscriptionRef.current.trim();
+              
+              setMessages(prev => {
+                const history = prev.filter(m => !m.id.startsWith('temp-'));
+                const newHistory = [...history];
+
+                if (userText) {
+                  newHistory.push({
+                    id: Date.now() + '-user',
+                    role: 'user',
+                    text: userText,
+                    isFinal: true
+                  });
+                }
+                
+                if (modelText) {
+                  newHistory.push({
+                    id: Date.now() + '-model',
+                    role: 'model',
+                    text: modelText,
+                    isFinal: true
+                  });
+                }
+                return newHistory;
+              });
+
+              // Clear buffers
+              currentInputTranscriptionRef.current = '';
+              currentOutputTranscriptionRef.current = '';
+            }
+
+            // 4. Handle Interruptions
             if (message.serverContent?.interrupted) {
               console.log("Interrupted - clearing audio queue");
               audioSourcesRef.current.forEach((src) => {
@@ -295,6 +400,21 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               });
               audioSourcesRef.current.clear();
               nextStartTimeRef.current = outputAudioContextRef.current?.currentTime || 0;
+              
+              // If interrupted, solidify what we have so far
+              const modelText = currentOutputTranscriptionRef.current.trim();
+              if (modelText) {
+                 setMessages(prev => {
+                    const history = prev.filter(m => !m.id.startsWith('temp-'));
+                    return [...history, {
+                      id: Date.now() + '-model-interrupted',
+                      role: 'model',
+                      text: modelText + '...',
+                      isFinal: true
+                    }];
+                 });
+              }
+              currentOutputTranscriptionRef.current = '';
             }
           },
           onclose: () => {
@@ -312,7 +432,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
           },
-          // Explicitly structure the instruction as content parts for API stability
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
           systemInstruction: { parts: [{ text: systemInstructionText }] },
         }
       });
@@ -333,6 +454,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     status,
     connect,
     disconnect: cleanup,
-    errorMessage
+    errorMessage,
+    messages,
+    currentVolume
   };
 };
