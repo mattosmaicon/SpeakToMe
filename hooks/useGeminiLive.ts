@@ -1,47 +1,14 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality } from '@google/genai';
-import { LanguageConfig, SessionStatus, ChatMessage } from '../types';
+import { LanguageConfig, SessionStatus } from '../types';
 import { createPcmBlob, base64ToBytes, decodeAudioData } from '../utils/audioUtils';
 
 // Constants for audio settings
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
-// We'll use a specific buffer size for the worklet to match the chunking behavior
 const BUFFER_SIZE = 4096;
 
-// AudioWorklet processor code embedded as a string to avoid external file loading issues in build
-const WORKLET_CODE = `
-class PCMProcessor extends AudioWorkletProcessor {
-  constructor() {
-    super();
-    this.bufferSize = ${BUFFER_SIZE};
-    this.buffer = new Float32Array(this.bufferSize);
-    this.bytesWritten = 0;
-  }
-
-  process(inputs) {
-    const input = inputs[0];
-    if (input.length > 0) {
-      const channelData = input[0];
-      
-      for (let i = 0; i < channelData.length; i++) {
-        this.buffer[this.bytesWritten] = channelData[i];
-        this.bytesWritten++;
-
-        if (this.bytesWritten >= this.bufferSize) {
-          // Send the buffer to the main thread
-          this.port.postMessage(this.buffer);
-          this.bytesWritten = 0;
-        }
-      }
-    }
-    return true;
-  }
-}
-registerProcessor('pcm-processor', PCMProcessor);
-`;
-
-// Helper to clean up template literals
+// Helper to clean up template literals and remove extra whitespace/newlines
 const cleanPrompt = (text: string) => {
   return text.replace(/\s+/g, ' ').trim();
 };
@@ -49,37 +16,23 @@ const cleanPrompt = (text: string) => {
 export const useGeminiLive = (config: LanguageConfig | null) => {
   const [status, setStatus] = useState<SessionStatus>(SessionStatus.IDLE);
   const [errorMessage, setErrorMessage] = useState<string>('');
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [currentVolume, setCurrentVolume] = useState<number>(0);
   
-  // Refs for audio handling
+  // Refs for audio handling to avoid re-renders
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
 
-  // Refs for Transcription Handling
-  const currentInputTranscriptionRef = useRef<string>('');
-  const currentOutputTranscriptionRef = useRef<string>('');
-  
   const cleanup = useCallback(() => {
     // Stop all playing audio
     audioSourcesRef.current.forEach((source) => {
       try { source.stop(); } catch (e) {}
     });
     audioSourcesRef.current.clear();
-
-    // Disconnect worklet
-    if (workletNodeRef.current) {
-      workletNodeRef.current.port.onmessage = null;
-      workletNodeRef.current.disconnect();
-      workletNodeRef.current = null;
-    }
 
     // Close contexts
     if (inputAudioContextRef.current?.state !== 'closed') {
@@ -99,11 +52,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     sessionPromiseRef.current = null;
     
     setStatus(SessionStatus.IDLE);
-    setMessages([]);
-    currentInputTranscriptionRef.current = '';
-    currentOutputTranscriptionRef.current = '';
     nextStartTimeRef.current = 0;
-    setCurrentVolume(0);
   }, []);
 
   const getDifficultyInstruction = (config: LanguageConfig) => {
@@ -220,19 +169,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
         `;
         break;
 
-      case 'interview':
-        modeInstruction = `
-          MODE: JOB INTERVIEW / SCENARIO SIMULATION.
-          CONTEXT: "${config.topicOrWords || 'General Job Interview'}".
-          YOUR ROLE: Professional Interviewer or Scenario Actor.
-          INTERACTION RULES:
-          1. Conduct a realistic roleplay based on the Context.
-          2. Ask relevant, probing questions one by one.
-          3. If the user makes a significant mistake (grammar/cultural), briefly step out of character to correct it using [Square Brackets], then immediately resume character.
-          4. Maintain the professional demeanor appropriate for the scenario.
-        `;
-        break;
-
       case 'free_chat':
       default:
         modeInstruction = `
@@ -267,7 +203,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       inputAudioContextRef.current = new AudioContextClass({ sampleRate: INPUT_SAMPLE_RATE });
       outputAudioContextRef.current = new AudioContextClass({ sampleRate: OUTPUT_SAMPLE_RATE });
 
-      // Ensure contexts are resumed (vital for some browsers)
       if (inputAudioContextRef.current.state === 'suspended') {
         await inputAudioContextRef.current.resume();
       }
@@ -275,17 +210,14 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
         await outputAudioContextRef.current.resume();
       }
 
-      // Setup AudioWorklet
-      const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
-      const workletUrl = URL.createObjectURL(blob);
-      await inputAudioContextRef.current.audioWorklet.addModule(workletUrl);
-
       const outputNode = outputAudioContextRef.current.createGain();
       outputNode.connect(outputAudioContextRef.current.destination);
 
       streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
       
       const ai = new GoogleGenAI({ apiKey });
+      
+      // CRITICAL FIX: Ensure clean string and wrap in parts object for production stability
       const systemInstructionText = getSystemInstruction(config);
       
       sessionPromiseRef.current = ai.live.connect({
@@ -298,33 +230,14 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             if (!inputAudioContextRef.current || !streamRef.current) return;
             
             const source = inputAudioContextRef.current.createMediaStreamSource(streamRef.current);
-            inputSourceRef.current = source;
+            const processor = inputAudioContextRef.current.createScriptProcessor(BUFFER_SIZE, 1, 1);
             
-            // Analyser for volume visualization (Parallel to worklet)
-            const analyser = inputAudioContextRef.current.createAnalyser();
-            analyser.fftSize = 256;
-            source.connect(analyser);
-            analyserRef.current = analyser;
-
-            // Worklet for PCM processing
-            const workletNode = new AudioWorkletNode(inputAudioContextRef.current, 'pcm-processor');
-            workletNodeRef.current = workletNode;
-            
-            workletNode.port.onmessage = (event) => {
-              const inputData = event.data; // Float32Array from worklet
+            processor.onaudioprocess = (e) => {
+              const inputData = e.inputBuffer.getChannelData(0);
+              const pcmBlob = createPcmBlob(inputData);
               
-              // Volume calc (Visualization)
-              if (analyserRef.current) {
-                const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-                analyserRef.current.getByteFrequencyData(dataArray);
-                const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
-                setCurrentVolume(avg);
-              }
-
-              // Send to Gemini
               if (sessionPromiseRef.current) {
-                 const pcmBlob = createPcmBlob(inputData);
-                 sessionPromiseRef.current.then((session: any) => {
+                sessionPromiseRef.current.then((session: any) => {
                   try {
                     session.sendRealtimeInput({ media: pcmBlob });
                   } catch (e) {
@@ -334,12 +247,16 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               }
             };
 
-            source.connect(workletNode);
-            workletNode.connect(inputAudioContextRef.current.destination);
+            source.connect(processor);
+            processor.connect(inputAudioContextRef.current.destination);
+            
+            inputSourceRef.current = source;
+            scriptProcessorRef.current = processor;
           },
           onmessage: async (message: LiveServerMessage) => {
-            // 1. Handle Audio
+            // Safe access to audio data
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            
             if (base64Audio && outputAudioContextRef.current) {
               try {
                 nextStartTimeRef.current = Math.max(
@@ -371,73 +288,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               }
             }
 
-            // 2. Handle Transcription
-            // Accumulate input (User)
-            if (message.serverContent?.inputTranscription) {
-              const text = message.serverContent.inputTranscription.text;
-              currentInputTranscriptionRef.current += text;
-              
-              setMessages(prev => {
-                const existing = prev.filter(m => m.id !== 'temp-user');
-                return [...existing, {
-                  id: 'temp-user',
-                  role: 'user',
-                  text: currentInputTranscriptionRef.current,
-                  isFinal: false
-                }];
-              });
-            }
-
-            // Accumulate output (Model)
-            if (message.serverContent?.outputTranscription) {
-              const text = message.serverContent.outputTranscription.text;
-              currentOutputTranscriptionRef.current += text;
-
-              setMessages(prev => {
-                const existing = prev.filter(m => m.id !== 'temp-model');
-                return [...existing, {
-                  id: 'temp-model',
-                  role: 'model',
-                  text: currentOutputTranscriptionRef.current,
-                  isFinal: false
-                }];
-              });
-            }
-
-            // 3. Handle Turn Complete (Solidify transcripts)
-            if (message.serverContent?.turnComplete) {
-              const userText = currentInputTranscriptionRef.current.trim();
-              const modelText = currentOutputTranscriptionRef.current.trim();
-              
-              setMessages(prev => {
-                const history = prev.filter(m => !m.id.startsWith('temp-'));
-                const newHistory = [...history];
-
-                if (userText) {
-                  newHistory.push({
-                    id: Date.now() + '-user',
-                    role: 'user',
-                    text: userText,
-                    isFinal: true
-                  });
-                }
-                
-                if (modelText) {
-                  newHistory.push({
-                    id: Date.now() + '-model',
-                    role: 'model',
-                    text: modelText,
-                    isFinal: true
-                  });
-                }
-                return newHistory;
-              });
-
-              currentInputTranscriptionRef.current = '';
-              currentOutputTranscriptionRef.current = '';
-            }
-
-            // 4. Handle Interruptions
             if (message.serverContent?.interrupted) {
               console.log("Interrupted - clearing audio queue");
               audioSourcesRef.current.forEach((src) => {
@@ -445,20 +295,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               });
               audioSourcesRef.current.clear();
               nextStartTimeRef.current = outputAudioContextRef.current?.currentTime || 0;
-              
-              const modelText = currentOutputTranscriptionRef.current.trim();
-              if (modelText) {
-                 setMessages(prev => {
-                    const history = prev.filter(m => !m.id.startsWith('temp-'));
-                    return [...history, {
-                      id: Date.now() + '-model-interrupted',
-                      role: 'model',
-                      text: modelText + '...',
-                      isFinal: true
-                    }];
-                 });
-              }
-              currentOutputTranscriptionRef.current = '';
             }
           },
           onclose: () => {
@@ -476,8 +312,7 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
           speechConfig: {
             voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } 
           },
-          inputAudioTranscription: {},
-          outputAudioTranscription: {},
+          // Explicitly structure the instruction as content parts for API stability
           systemInstruction: { parts: [{ text: systemInstructionText }] },
         }
       });
@@ -498,8 +333,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
     status,
     connect,
     disconnect: cleanup,
-    errorMessage,
-    messages,
-    currentVolume
+    errorMessage
   };
 };

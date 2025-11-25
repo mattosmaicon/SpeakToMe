@@ -10,8 +10,8 @@ export const TRANSLATIONS = {
       wantToLearn: "I want to learn...",
       next: "Next Step",
       start: "Start Session",
-      topicLabel: "Topic or Context:",
-      topicPlaceholder: "e.g. Job Interview for Software Engineer, Medical Vocabulary...",
+      topicLabel: "Topic or Words to use:",
+      topicPlaceholder: "e.g. Technology, Global Warming, or specific words...",
       back: "Back",
       requiresAdvanced: "Requires Advanced or Native level",
       difficulty: {
@@ -48,10 +48,6 @@ export const TRANSLATIONS = {
         translator: {
           title: "Live Translator",
           desc: "Instant bidirectional translation between selected languages."
-        },
-        interview: {
-          title: "Interview Prep",
-          desc: "Simulate a job interview or specific scenario with transcript."
         }
       },
       settings: "Settings",
@@ -62,23 +58,20 @@ export const TRANSLATIONS = {
     active: {
       end: "End Conversation",
       reconnect: "Reconnect",
-      listening: "Listening...",
-      translateHint: (lang: string) => `Translating...`,
-      interruptHint: "AI will interrupt to correct pronunciation.",
+      listening: "Listening... Speak naturally.",
+      translateHint: (lang: string) => `Translating between selected languages...`,
+      interruptHint: "AI will interrupt to correct pronunciation & grammar.",
       connectionIssue: "Connection Issue",
       goBack: "Go Back",
       liveSession: "Live Session",
-      currentFocus: "Scenario",
-      connecting: "Connecting...",
-      showTranscript: "Show Transcript",
-      hideTranscript: "Hide Transcript"
+      currentFocus: "Current Focus",
+      connecting: "Connecting to AI..."
     },
     modeLabels: {
       free_chat: "Free Conversation",
       reconstruction: "Message Upgrade",
       critical_thinking: "Critical Thinking",
-      translator: "Translator Mode",
-      interview: "Interview Prep"
+      translator: "Translator Mode"
     }
   },
   pt: {
@@ -90,8 +83,8 @@ export const TRANSLATIONS = {
       wantToLearn: "Eu quero aprender...",
       next: "Próximo Passo",
       start: "Iniciar Sessão",
-      topicLabel: "Tópico ou Contexto:",
-      topicPlaceholder: "ex: Entrevista para Eng. de Software, Termos Médicos...",
+      topicLabel: "Tópico ou Palavras para usar:",
+      topicPlaceholder: "ex: Tecnologia, Aquecimento Global, ou palavras específicas...",
       back: "Voltar",
       requiresAdvanced: "Requer nível Avançado ou Nativo",
       difficulty: {
@@ -128,10 +121,6 @@ export const TRANSLATIONS = {
         translator: {
           title: "Tradutor Ao Vivo",
           desc: "Tradução bidirecional instantânea entre os idiomas."
-        },
-        interview: {
-          title: "Simulação de Entrevista",
-          desc: "Simule uma entrevista de emprego ou cenário específico com transcrição."
         }
       },
       settings: "Configurações",
@@ -142,23 +131,20 @@ export const TRANSLATIONS = {
     active: {
       end: "Encerrar Conversa",
       reconnect: "Reconectar",
-      listening: "Ouvindo...",
-      translateHint: (lang: string) => `Traduzindo...`,
-      interruptHint: "A IA irá interromper para corrigir pronúncia.",
+      listening: "Ouvindo... Fale naturalmente.",
+      translateHint: (lang: string) => `Traduzindo entre os idiomas selecionados...`,
+      interruptHint: "A IA irá interromper para corrigir pronúncia e gramática.",
       connectionIssue: "Problema de Conexão",
       goBack: "Voltar",
       liveSession: "Sessão Ao Vivo",
-      currentFocus: "Cenário",
-      connecting: "Conectando...",
-      showTranscript: "Ver Transcrição",
-      hideTranscript: "Ocultar Transcrição"
+      currentFocus: "Foco Atual",
+      connecting: "Conectando à IA..."
     },
     modeLabels: {
       free_chat: "Conversação Livre",
       reconstruction: "Reconstrução",
       critical_thinking: "Pensamento Crítico",
-      translator: "Modo Tradutor",
-      interview: "Simulação Entrevista"
+      translator: "Modo Tradutor"
     }
   }
 };

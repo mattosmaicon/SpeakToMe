@@ -10,12 +10,6 @@ export default defineConfig(({ mode }) => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
-        workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-          cleanupOutdatedCaches: true,
-          clientsClaim: true,
-          skipWaiting: true
-        },
         manifest: {
           name: 'SpeakToMe',
           short_name: 'SpeakToMe',
@@ -35,6 +29,12 @@ export default defineConfig(({ mode }) => {
               src: 'pwa-512x512.png',
               sizes: '512x512',
               type: 'image/png'
+            },
+            {
+              src: 'pwa-512x512.png',
+              sizes: '512x512',
+              type: 'image/png',
+              purpose: 'any maskable'
             }
           ]
         }
