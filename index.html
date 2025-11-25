@@ -5,33 +5,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0f172a" />
     <title>SpeakToMe</title>
+    <!-- Tailwind CDN restored for immediate visual fix -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-      /* Custom pulse animation for the voice indicator */
-      @keyframes soft-pulse {
-        0% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
-        70% { box-shadow: 0 0 0 20px rgba(99, 102, 241, 0); }
-        100% { box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            animation: {
+              'soft-pulse': 'soft-pulse 2s infinite',
+            },
+            keyframes: {
+              'soft-pulse': {
+                '0%': { boxShadow: '0 0 0 0 rgba(99, 102, 241, 0.4)' },
+                '70%': { boxShadow: '0 0 0 20px rgba(99, 102, 241, 0)' },
+                '100%': { boxShadow: '0 0 0 0 rgba(99, 102, 241, 0)' },
+              }
+            }
+          }
+        }
       }
-      .animate-soft-pulse {
-        animation: soft-pulse 2s infinite;
+    </script>
+    <script type="importmap">
+    {
+      "imports": {
+        "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
+        "react/": "https://aistudiocdn.com/react@^19.2.0/",
+        "react": "https://aistudiocdn.com/react@^19.2.0",
+        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+        "vite": "https://aistudiocdn.com/vite@^7.2.4",
+        "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
+        "vite-plugin-pwa": "https://aistudiocdn.com/vite-plugin-pwa@^1.1.0"
       }
-    </style>
-<script type="importmap">
-{
-  "imports": {
-    "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.1",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.30.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "vite": "https://aistudiocdn.com/vite@^7.2.4",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.554.0",
-    "vite-plugin-pwa": "https://aistudiocdn.com/vite-plugin-pwa@^1.1.0"
-  }
-}
-</script>
-</head>
+    }
+    </script>
+  </head>
   <body class="bg-slate-900 text-slate-100 antialiased h-screen overflow-hidden">
     <div id="root" class="h-full w-full"></div>
     <script type="module" src="/index.tsx"></script>
