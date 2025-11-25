@@ -6,9 +6,42 @@ import { createPcmBlob, base64ToBytes, decodeAudioData } from '../utils/audioUti
 // Constants for audio settings
 const INPUT_SAMPLE_RATE = 16000;
 const OUTPUT_SAMPLE_RATE = 24000;
+// We'll use a specific buffer size for the worklet to match the chunking behavior
 const BUFFER_SIZE = 4096;
 
-// Helper to clean up template literals and remove extra whitespace/newlines
+// AudioWorklet processor code embedded as a string to avoid external file loading issues in build
+const WORKLET_CODE = `
+class PCMProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.bufferSize = ${BUFFER_SIZE};
+    this.buffer = new Float32Array(this.bufferSize);
+    this.bytesWritten = 0;
+  }
+
+  process(inputs) {
+    const input = inputs[0];
+    if (input.length > 0) {
+      const channelData = input[0];
+      
+      for (let i = 0; i < channelData.length; i++) {
+        this.buffer[this.bytesWritten] = channelData[i];
+        this.bytesWritten++;
+
+        if (this.bytesWritten >= this.bufferSize) {
+          // Send the buffer to the main thread
+          this.port.postMessage(this.buffer);
+          this.bytesWritten = 0;
+        }
+      }
+    }
+    return true;
+  }
+}
+registerProcessor('pcm-processor', PCMProcessor);
+`;
+
+// Helper to clean up template literals
 const cleanPrompt = (text: string) => {
   return text.replace(/\s+/g, ' ').trim();
 };
@@ -19,11 +52,11 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [currentVolume, setCurrentVolume] = useState<number>(0);
   
-  // Refs for audio handling to avoid re-renders
+  // Refs for audio handling
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null);
+  const workletNodeRef = useRef<AudioWorkletNode | null>(null);
   const nextStartTimeRef = useRef<number>(0);
   const audioSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const sessionPromiseRef = useRef<Promise<any> | null>(null);
@@ -40,6 +73,13 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       try { source.stop(); } catch (e) {}
     });
     audioSourcesRef.current.clear();
+
+    // Disconnect worklet
+    if (workletNodeRef.current) {
+      workletNodeRef.current.port.onmessage = null;
+      workletNodeRef.current.disconnect();
+      workletNodeRef.current = null;
+    }
 
     // Close contexts
     if (inputAudioContextRef.current?.state !== 'closed') {
@@ -227,12 +267,18 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
       inputAudioContextRef.current = new AudioContextClass({ sampleRate: INPUT_SAMPLE_RATE });
       outputAudioContextRef.current = new AudioContextClass({ sampleRate: OUTPUT_SAMPLE_RATE });
 
+      // Ensure contexts are resumed (vital for some browsers)
       if (inputAudioContextRef.current.state === 'suspended') {
         await inputAudioContextRef.current.resume();
       }
       if (outputAudioContextRef.current.state === 'suspended') {
         await outputAudioContextRef.current.resume();
       }
+
+      // Setup AudioWorklet
+      const blob = new Blob([WORKLET_CODE], { type: "application/javascript" });
+      const workletUrl = URL.createObjectURL(blob);
+      await inputAudioContextRef.current.audioWorklet.addModule(workletUrl);
 
       const outputNode = outputAudioContextRef.current.createGain();
       outputNode.connect(outputAudioContextRef.current.destination);
@@ -252,28 +298,33 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
             if (!inputAudioContextRef.current || !streamRef.current) return;
             
             const source = inputAudioContextRef.current.createMediaStreamSource(streamRef.current);
-            const processor = inputAudioContextRef.current.createScriptProcessor(BUFFER_SIZE, 1, 1);
+            inputSourceRef.current = source;
             
-            // Analyser for volume visualization
+            // Analyser for volume visualization (Parallel to worklet)
             const analyser = inputAudioContextRef.current.createAnalyser();
             analyser.fftSize = 256;
             source.connect(analyser);
             analyserRef.current = analyser;
 
-            processor.onaudioprocess = (e) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const pcmBlob = createPcmBlob(inputData);
+            // Worklet for PCM processing
+            const workletNode = new AudioWorkletNode(inputAudioContextRef.current, 'pcm-processor');
+            workletNodeRef.current = workletNode;
+            
+            workletNode.port.onmessage = (event) => {
+              const inputData = event.data; // Float32Array from worklet
               
-              // Volume calc
+              // Volume calc (Visualization)
               if (analyserRef.current) {
                 const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
                 analyserRef.current.getByteFrequencyData(dataArray);
                 const avg = dataArray.reduce((a, b) => a + b) / dataArray.length;
-                setCurrentVolume(avg); // Simple update, might want to throttle in real prod
+                setCurrentVolume(avg);
               }
 
+              // Send to Gemini
               if (sessionPromiseRef.current) {
-                sessionPromiseRef.current.then((session: any) => {
+                 const pcmBlob = createPcmBlob(inputData);
+                 sessionPromiseRef.current.then((session: any) => {
                   try {
                     session.sendRealtimeInput({ media: pcmBlob });
                   } catch (e) {
@@ -283,11 +334,8 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               }
             };
 
-            source.connect(processor);
-            processor.connect(inputAudioContextRef.current.destination);
-            
-            inputSourceRef.current = source;
-            scriptProcessorRef.current = processor;
+            source.connect(workletNode);
+            workletNode.connect(inputAudioContextRef.current.destination);
           },
           onmessage: async (message: LiveServerMessage) => {
             // 1. Handle Audio
@@ -329,7 +377,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               const text = message.serverContent.inputTranscription.text;
               currentInputTranscriptionRef.current += text;
               
-              // Optimistically update UI for current user speech
               setMessages(prev => {
                 const existing = prev.filter(m => m.id !== 'temp-user');
                 return [...existing, {
@@ -346,7 +393,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               const text = message.serverContent.outputTranscription.text;
               currentOutputTranscriptionRef.current += text;
 
-              // Optimistically update UI for current model speech
               setMessages(prev => {
                 const existing = prev.filter(m => m.id !== 'temp-model');
                 return [...existing, {
@@ -387,7 +433,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
                 return newHistory;
               });
 
-              // Clear buffers
               currentInputTranscriptionRef.current = '';
               currentOutputTranscriptionRef.current = '';
             }
@@ -401,7 +446,6 @@ export const useGeminiLive = (config: LanguageConfig | null) => {
               audioSourcesRef.current.clear();
               nextStartTimeRef.current = outputAudioContextRef.current?.currentTime || 0;
               
-              // If interrupted, solidify what we have so far
               const modelText = currentOutputTranscriptionRef.current.trim();
               if (modelText) {
                  setMessages(prev => {
